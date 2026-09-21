@@ -2,6 +2,28 @@
   "AWSTemplateFormatVersion": "2010-09-09",
   "Description": "SEIS 665 Corporate Web Server Infrastructure",
 
+  "Parameters": {
+    "InstanceType": {
+      "Type": "String",
+      "Default": "t2.micro",
+      "AllowedValues": [
+        "t2.micro",
+        "t2.small"
+      ],
+      "Description": "EC2 instance type"
+    },
+
+    "KeyPair": {
+      "Type": "AWS::EC2::KeyPair::KeyName",
+      "Description": "EC2 Key Pair name"
+    },
+
+    "YourIp": {
+      "Type": "String",
+      "Description": "Your public IP address in CIDR notation, for example 1.2.3.4/32"
+    }
+  },
+
   "Resources": {
 
     "EngineeringVpc": {
@@ -31,14 +53,14 @@
       }
     },
 
-    "InternetGatewayAttachment": {
+    "VpcGatewayAttachment": {
       "Type": "AWS::EC2::VPCGatewayAttachment",
       "Properties": {
-        "InternetGatewayId": {
-          "Ref": "InternetGateway"
-        },
         "VpcId": {
           "Ref": "EngineeringVpc"
+        },
+        "InternetGatewayId": {
+          "Ref": "InternetGateway"
         }
       }
     },
@@ -106,7 +128,232 @@
           }
         ]
       }
-    }
+    },
 
+    "InternetRoute": {
+      "Type": "AWS::EC2::Route",
+      "DependsOn": "VpcGatewayAttachment",
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "PublicRouteTable"
+        },
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "GatewayId": {
+          "Ref": "InternetGateway"
+        }
+      }
+    },
+
+    "PublicSubnet1RouteTableAssociation": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties": {
+        "SubnetId": {
+          "Ref": "PublicSubnet1"
+        },
+        "RouteTableId": {
+          "Ref": "PublicRouteTable"
+        }
+      }
+    },
+
+    "PublicSubnet2RouteTableAssociation": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties": {
+        "SubnetId": {
+          "Ref": "PublicSubnet2"
+        },
+        "RouteTableId": {
+          "Ref": "PublicRouteTable"
+        }
+      }
+    },
+
+    "WebserversSG": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupName": "WebserversSG",
+        "GroupDescription": "Security group for web servers",
+        "VpcId": {
+          "Ref": "EngineeringVpc"
+        },
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 22,
+            "ToPort": 22,
+            "CidrIp": {
+              "Ref": "YourIp"
+            }
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 80,
+            "ToPort": 80,
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "SecurityGroupEgress": [
+          {
+            "IpProtocol": "-1",
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "WebserversSG"
+          }
+        ]
+      }
+    },
+
+    "web1": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "ImageId": "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}",
+        "InstanceType": {
+          "Ref": "InstanceType"
+        },
+        "KeyName": {
+          "Ref": "KeyPair"
+        },
+        "SubnetId": {
+          "Ref": "PublicSubnet1"
+        },
+        "SecurityGroupIds": [
+          {
+            "Ref": "WebserversSG"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "web1"
+          }
+        ],
+        "UserData": {
+          "Fn::Base64": "#!/bin/bash\ndnf update -y\ndnf install -y git httpd php\nservice httpd start\nchkconfig httpd on\naws s3 cp s3://seis665-public/index.php /var/www/html/"
+        }
+      }
+    },
+
+    "web2": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "ImageId": "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}",
+        "InstanceType": {
+          "Ref": "InstanceType"
+        },
+        "KeyName": {
+          "Ref": "KeyPair"
+        },
+        "SubnetId": {
+          "Ref": "PublicSubnet2"
+        },
+        "SecurityGroupIds": [
+          {
+            "Ref": "WebserversSG"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "web2"
+          }
+        ],
+        "UserData": {
+          "Fn::Base64": "#!/bin/bash\ndnf update -y\ndnf install -y git httpd php\nservice httpd start\nchkconfig httpd on\naws s3 cp s3://seis665-public/index.php /var/www/html/"
+        }
+      }
+    },
+
+    "EngineeringLB": {
+      "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+      "Properties": {
+        "Name": "EngineeringLB",
+        "Scheme": "internet-facing",
+        "Type": "application",
+        "Subnets": [
+          {
+            "Ref": "PublicSubnet1"
+          },
+          {
+            "Ref": "PublicSubnet2"
+          }
+        ],
+        "SecurityGroups": [
+          {
+            "Ref": "WebserversSG"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "EngineeringLB"
+          }
+        ]
+      }
+    },
+
+    "EngineeringWebservers": {
+      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+      "Properties": {
+        "Name": "EngineeringWebservers",
+        "Port": 80,
+        "Protocol": "HTTP",
+        "VpcId": {
+          "Ref": "EngineeringVpc"
+        },
+        "TargetType": "instance",
+        "HealthCheckProtocol": "HTTP",
+        "HealthCheckPort": "80",
+        "HealthCheckPath": "/",
+        "Targets": [
+          {
+            "Id": {
+              "Ref": "web1"
+            },
+            "Port": 80
+          },
+          {
+            "Id": {
+              "Ref": "web2"
+            },
+            "Port": 80
+          }
+        ]
+      }
+    },
+
+    "EngineeringLBListener": {
+      "Type": "AWS::ElasticLoadBalancingV2::Listener",
+      "Properties": {
+        "LoadBalancerArn": {
+          "Ref": "EngineeringLB"
+        },
+        "Port": 80,
+        "Protocol": "HTTP",
+        "DefaultActions": [
+          {
+            "Type": "forward",
+            "TargetGroupArn": {
+              "Ref": "EngineeringWebservers"
+            }
+          }
+        ]
+      }
+    }
+  },
+
+  "Outputs": {
+    "WebUrl": {
+      "Description": "DNS name of the Application Load Balancer",
+      "Value": {
+        "Fn::GetAtt": [
+          "EngineeringLB",
+          "DNSName"
+        ]
+      }
+    }
   }
 }
