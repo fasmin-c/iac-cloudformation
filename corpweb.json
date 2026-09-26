@@ -232,7 +232,7 @@
           }
         ],
         "UserData": {
-          "Fn::Base64": "#!/bin/bash\ndnf update -y\ndnf install -y git httpd php\nservice httpd start\nchkconfig httpd on\naws s3 cp s3://seis665-public/index.php /var/www/html/"
+          "Fn::Base64": "#!/bin/bash\ndnf update -y\ndnf install -y git httpd php\nservice httpd start\nchkconfig httpd on\naws s3 cp s3://seis665-public/index.php /var/www/html/ --no-sign-request"
         }
       }
     },
@@ -262,7 +262,7 @@
           }
         ],
         "UserData": {
-          "Fn::Base64": "#!/bin/bash\ndnf update -y\ndnf install -y git httpd php\nservice httpd start\nchkconfig httpd on\naws s3 cp s3://seis665-public/index.php /var/www/html/"
+          "Fn::Base64": "#!/bin/bash\ndnf update -y\ndnf install -y git httpd php\nservice httpd start\nchkconfig httpd on\naws s3 cp s3://seis665-public/index.php /var/www/html/ --no-sign-request"
         }
       }
     },
